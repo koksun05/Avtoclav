@@ -9,32 +9,32 @@
 const char* ssid = "Hata";
 const char* password = "12345678";
 
-#define BUZZER    15       //d8
+#define BUZZER    15       //d8 esp8266
 #define RELAY_PIN 16       //D0
 #define MENU_BTN  14       //D5 
 #define PLUS_BTN  12       //D6
 #define MINUS_BTN 13       //D7
 
 LiquidCrystal_PCF8574 lcd(0x27);
-byte gradus[] = { 0b01100, 0b10010, 0b10010, 0b01100,
+byte gradus[] = { 0b01100, 0b10010, 0b10010, 0b01100, //символ градуса
                  0b00000, 0b00000, 0b00000, 0b00000 };
 Adafruit_ADS1115 ads;
-//const float LSB_GAIN_ONE = 0.0625e-3f;//для диффиринціального вх А0-А1
-const float DIVIDER_RATIO = 131.0f; 
-const float K_P = 0.4895;              // коефіціент для тиску
-#define CT_RATIO 1000.0       // коефіцієнт трансформатора струму (підлаштуй)
-#define R_BURDEN 106.0        // Ом (резистор вимірювання струму вторинки)
-#define LSB_GAIN_ONE 0.0625e-3f 
-float voltage = 0.0f;
-float tenCurrent = 0.0f;
-float tenPower = 0.0f;
-float total_kWh = 0.0f;    // загальна енергія
-uint8_t setTemp = 120;
-float t_fakt = 0.0;
-float P = 0.0;
-bool U_low = false;
+const float DIVIDER_RATIO = 131.0f;    //для напруги
+const float K_P = 0.4895;          // коефіціент для тиску
+#define CT_RATIO 1000.0           // коефіцієнт трансформатора струму (підлаштуй)
+#define R_BURDEN 106.0            // Ом (резистор вимірювання струму вторинки)
+#define LSB_GAIN_ONE 0.0625e-3f   // дільник для ads1115
+float voltage = 0.0f;             //  напруга
+float tenCurrent = 0.0f;          //  струм
+float tenPower = 0.0f;            // потужність
+float total_kWh = 0.0f;          // загальна енергія
+uint8_t setTemp = 120;           // встановлена температура
+float t_fakt = 0.0;              // фактична температура
+float P = 0.0;                   // тиск
+bool U_low = false;              
 bool tenErr = false;
 bool  P_err = false;
+bool  t_err = false;
 int minU = 165; 
 int menu = 0;
 float  hister = 0.1;
@@ -49,16 +49,13 @@ int saved_h = 0;
 int saved_m = 0;
 int saved_s = 0;
 
-
 unsigned long menu2_lastActivity = 0;
 const unsigned long MENU2_TIMEOUT = 10000; // 10 сек
 
-// only hours and minutes in menu2 now
-int editField = 0; // 0 = hours, 1 = minutes
-
+int editField = 0; // перемикач для налаштування в режимі меню2. 0 = hours, 1 = minutes
 //------------------------
 int startHours   = 0;   // стартовий час таймера
-int startMinutes = 1;   // <-- ЗМІНИ ОТУТ (приклад — 1 хв)
+int startMinutes = 1;   // 
 int startSeconds = 30;
   
 bool timer_flag = false;     // Прапорець запуску відліку таймера
@@ -77,7 +74,6 @@ const unsigned long MENU_HOLD_MS = 1000UL;   // довге меню — 1 сек
 const unsigned long REPEAT_DELAY = 400UL;    // затримка перед автоповтором (ms)
 const unsigned long REPEAT_INTERVAL = 100UL; // інтервал автоповтору (ms)
 
-// button state trackers
 bool menuLast = HIGH;
 unsigned long menuPressTime = 0;
 bool menuLongFired = false;
@@ -103,12 +99,11 @@ const int ADDR_savedM = 9;
 const int ADDR_savedS = 10; 
 const int ADDR_timerPaused = 11; 
 
-// forward declarations
+
 float readTempA3(int samples = 8);
 float readVoltageA2(int samples = 8);
 float readCurrentA0(int samples = 8);
 void readADS_andCalc();
-//void beepActive(int times = 2);
 float readPA1(int samples = 8);
 void displayMain();
 void display_2();
@@ -117,7 +112,7 @@ void loadSettingsFromEEPROM();
 void saveSettingsToEEPROM();
 
 
-//---------------------------------------------------------------------
+//---------------------------------------- читання тиску з А1 - 1115
 float readPA1(int samples) {
   long sum = 0;
   for (int i = 0; i < samples; ++i) {
@@ -129,7 +124,7 @@ float readPA1(int samples) {
   float press = 2.4138 * volt - 2.3897;
     return press;
 }
-//--------------------------------читання температури з А3 - 1115
+//----------------------------------------читання температури з А3 - 1115
 float readTempA3(int samples) {
   long sum = 0;
   for (int i = 0; i < samples; ++i) {
@@ -150,11 +145,23 @@ float readVoltageA2(int samples) {
     //delay(2);
   }
   float raw = (float)sum / (float)samples;
-  float voltADC = raw * LSB_GAIN_ONE; // V on ADS input
+  float voltADC = raw * LSB_GAIN_ONE; 
   float mains = voltADC * DIVIDER_RATIO;
   return mains;
 }
-
+//------------------------------------------ Читання струму з входу А0 -1115
+float readCurrentA0(int samples) {
+  double sumSq = 0;
+  for (int i = 0; i < samples; ++i) {
+    int16_t raw = ads.readADC_SingleEnded(0);
+    float v = raw * LSB_GAIN_ONE;
+    sumSq += (v * v);
+  }
+  float vRMS = sqrt(sumSq / samples);
+  float I_secondary = vRMS / R_BURDEN;
+  float I_primary = I_secondary * CT_RATIO;
+  return I_primary;
+}
 // ---------------- EEPROM helpers ----------------
 void loadSettingsFromEEPROM() {
   EEPROM.begin(EEPROM_SIZE);
@@ -179,10 +186,6 @@ saved_m = EEPROM.read(ADDR_savedM);
 saved_s = EEPROM.read(ADDR_savedS);
 timerPausedByLowU = EEPROM.read(ADDR_timerPaused) == 1;
 
-
-
-
-
 }
 
 void saveSettingsToEEPROM() {
@@ -192,17 +195,14 @@ void saveSettingsToEEPROM() {
   EEPROM.write(ADDR_tMins, (uint8_t)m);
   EEPROM.put(ADDR_totalKWh, total_kWh);
   EEPROM.write(ADDR_savedH, saved_h);             //збереження таймера
-EEPROM.write(ADDR_savedM, saved_m);        
-EEPROM.write(ADDR_savedS, saved_s);
-EEPROM.write(ADDR_timerPaused, timerPausedByLowU ? 1 : 0);
-
+  EEPROM.write(ADDR_savedM, saved_m);        
+  EEPROM.write(ADDR_savedS, saved_s);
+  EEPROM.write(ADDR_timerPaused, timerPausedByLowU ? 1 : 0);
   EEPROM.commit();
 }
-
 //---------------------------------------------------------------------
 void buttons() {
   unsigned long now = millis();
-
   // read pins (buttons are active LOW with INPUT_PULLUP)
   bool menuBtn = digitalRead(MENU_BTN);
   bool plusBtn = digitalRead(PLUS_BTN);
@@ -214,12 +214,13 @@ void buttons() {
     menuPressTime = now;
     menuLongFired = false;
   }
-
-  // if still held and long not yet fired -> check hold time and fire immediately
+  // якщо утримувати довше ніж MENU_HOLD_MS
   if (menuBtn == LOW && !menuLongFired && (now - menuPressTime >= MENU_HOLD_MS)) {
-    // long press action — fire once while still held
+    // спрацювало довге натискання 
     menuLongFired = true;
     work_flag = false;
+    P_err = false;
+    
     if (menu == 0) {
       // enter menu2
       menu = 1;
@@ -309,7 +310,6 @@ void buttons() {
     }
     plusRepeatActive = false;
   }
-
   plusLast = plusBtn;
 
   // ---------------- MINUS button handling ----------------
@@ -362,7 +362,6 @@ void buttons() {
   }
 
   minusLast = minusBtn;
-
   // ---------------- auto-exit menu2 on inactivity ----------------
   if (menu == 1 && (now - menu2_lastActivity > MENU2_TIMEOUT)) {
     // exit to main
@@ -371,21 +370,8 @@ void buttons() {
     saveSettingsToEEPROM();
   }
 }
-
 //------------------------------------------------------------------------------
-float readCurrentA0(int samples) {
-  double sumSq = 0;
-  for (int i = 0; i < samples; ++i) {
-    int16_t raw = ads.readADC_SingleEnded(0);
-    float v = raw * LSB_GAIN_ONE;
-    sumSq += (v * v);
-    //delay(2);
-  }
-  float vRMS = sqrt(sumSq / samples);
-  float I_secondary = vRMS / R_BURDEN;
-  float I_primary = I_secondary * CT_RATIO;
-  return I_primary;
-}
+
 //---------------------------------------------------------------------------
 void readADS_andCalc() {
    t_fakt = readTempA3(15);
@@ -398,17 +384,28 @@ void readADS_andCalc() {
   // ---- контроль ТЕНа з антифальш захистом ----
   static byte lowCurrentCount = 0;
   if (digitalRead(RELAY_PIN) == HIGH) {
-    
     if (tenCurrent < 0.2f) {
-      if (lowCurrentCount++ > 30) {tenErr = true;work_flag = false;}  // 3 рази поспіль
+      if (lowCurrentCount++ > 30) {tenErr = true;work_flag = false;}  // 30 раз поспіль
     } else {
       lowCurrentCount = 0;
       tenErr = false;
-      
     }
   } else {
     lowCurrentCount = 0;
     tenErr = false;
+  }
+
+  // ---- контроль тиску  ----
+  static byte pCount = 0;
+  if (work_flag) {
+    if (P < 0.9 || P > 4.0) {
+      if (pCount++ > 30) {P_err = true;work_flag = false;}  // 30 раз поспіль
+    } else {
+      pCount = 0;
+      P_err = false;
+    }
+  } else {
+    pCount = 0;
   }
 }
 //--------------------------------------------------------------------------------------------------
@@ -654,16 +651,18 @@ if(work_flag){
   if (menu == 0) { displayMain(); }
   else if (menu == 1) { display_2(); }
    }
- // delay(50);
- // неблокуючий біпер
-if (tenErr && !beepActiveFlag) {
+ 
+ //біпер
+  if (tenErr && !beepActiveFlag) {
   startBeep(3);
-}
+            }
+    if (P_err && !beepActiveFlag) {
+  startBeep(1);
+            }
 
 // НЕ блокуючий обробник біпера — виконується завжди, поки активний
-if (beepActiveFlag) {
+  if (beepActiveFlag) {
   unsigned long now = millis();
-
   if (beepPhase == 0) {                 // фаза "вмикання"
     digitalWrite(BUZZER, HIGH);
     if (now - beepTimer >= 300) {       // 300 мс ON
@@ -684,5 +683,5 @@ if (beepActiveFlag) {
       beepTimer = now;
     }
   }
-}
+  }
 }
