@@ -31,11 +31,11 @@ float total_kWh = 0.0f;          // загальна енергія
 uint8_t setTemp = 120;           // встановлена температура
 float t_fakt = 0.0;              // фактична температура
 float P = 0.0;                   // тиск
-bool U_low = false;              
-bool tenErr = false;
-bool  P_err = false;
-bool  t_err = false;
-int minU = 165; 
+bool U_low = false;              // прапор спрацьює при напрузі нижчій заданої    
+bool tenErr = false;             // прапор аварії тену
+bool  P_err = false;             // прапор тиск не в нормі 
+bool  t_err = false;             // прапор температура росте при вимкненому тені
+int minU = 165;                  // мінімум напруги 
 int menu = 0;
 float  hister = 0.1;
 // прапорці та змінні для біпера
